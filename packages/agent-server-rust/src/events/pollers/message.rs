@@ -17,8 +17,10 @@ use serde_json::json;
 
 /// 消息轮询器。
 /// 冷启动时只记录游标，不发消息，避免重放历史消息。
+/// 游标用 local_id（每个 Msg_ 表的 INTEGER PRIMARY KEY AUTOINCREMENT）—— 真单调。
+/// 不要用 server_id：WeChat 实测 server_id 不单调（新消息可能小于旧消息），会漏推。
 pub struct MessagePoller {
-    /// chat_id -> 最后一次看到的 server_id。
+    /// chat_id -> 最后一次看到的 local_id。
     pub last_seen: HashMap<String, i64>,
     pub interval_ms: u64,
     pub cold_start: bool,
@@ -103,10 +105,11 @@ impl Poller for MessagePoller {
             let mut updated = false;
 
             for msg in messages {
-                if msg.server_id <= latest_seen {
+                // 用 local_id 而不是 server_id —— server_id 实测非单调（WeChat 服务端分配规律不明）
+                if msg.local_id <= latest_seen {
                     continue;
                 }
-                latest_seen = msg.server_id;
+                latest_seen = msg.local_id;
                 updated = true;
 
                 if self.cold_start {
