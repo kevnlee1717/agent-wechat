@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+anyhow = "1"
 parking_lot = "0.12"
 ulid = "1.1"
 
