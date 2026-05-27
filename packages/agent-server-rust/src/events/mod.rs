@@ -5,6 +5,8 @@ pub mod bus;
 pub mod id;
 pub mod pollers;
 
+use std::sync::{Arc, OnceLock};
+
 use serde::{Deserialize, Serialize};
 
 /// 统一事件信封。
@@ -39,6 +41,18 @@ impl Event {
     pub fn chat_id(&self) -> Option<&str> {
         self.data.get("chatId").and_then(|v| v.as_str())
     }
+}
+
+static GLOBAL_BUS: OnceLock<Arc<crate::events::bus::EventBus>> = OnceLock::new();
+
+/// 设置全局 EventBus，供无 State 路由读取。
+pub fn set_global_bus(bus: Arc<crate::events::bus::EventBus>) {
+    let _ = GLOBAL_BUS.set(bus);
+}
+
+/// 读取全局 EventBus。
+pub fn get_global_bus() -> Option<Arc<crate::events::bus::EventBus>> {
+    GLOBAL_BUS.get().cloned()
 }
 
 /// 事件 type 常量（统一由单一入口使用）。
