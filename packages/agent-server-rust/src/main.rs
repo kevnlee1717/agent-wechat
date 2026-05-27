@@ -5,6 +5,7 @@ mod db;
 mod effects;
 mod execution;
 mod ia;
+mod events;
 mod tools;
 mod plans;
 mod router;

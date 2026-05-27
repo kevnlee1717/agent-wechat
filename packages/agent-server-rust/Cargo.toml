@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+parking_lot = "0.12"
+ulid = "1.1"
 
 # HTTP server + WebSocket
 axum = { version = "0.8", features = ["ws"] }
