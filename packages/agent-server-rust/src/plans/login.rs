@@ -134,13 +134,15 @@ fn handle_authenticating(
     match state.main_window.view {
         MainWindowView::LoginQr => {
             let qr_data = state.main_window.qr_data.as_ref();
-            if let Some(qr) = qr_data {
-                if plan_state.last_emitted_qr.as_ref() != Some(qr) {
-                    plan_state.last_emitted_qr = Some(qr.clone());
-                    return Some(SelectedAction {
-                        action: actions::sequence(vec![
-                            Action::Emit {
-                                event: SubscriptionEvent {
+                if let Some(qr) = qr_data {
+                    if plan_state.last_emitted_qr.as_ref() != Some(qr) {
+                        plan_state.last_emitted_qr = Some(qr.clone());
+                        // TODO: 将二维码刷新事件转为 session 事件（session.qr_refresh）
+                        // 暂不在此处实现，避免影响现有 LoginPlan 的订阅事件兼容性。
+                        return Some(SelectedAction {
+                            action: actions::sequence(vec![
+                                Action::Emit {
+                                    event: SubscriptionEvent {
                                     event_type: "qr".to_string(),
                                     data: [
                                         ("qrData".to_string(), serde_json::Value::String(qr.clone())),
@@ -168,6 +170,7 @@ fn handle_authenticating(
         MainWindowView::LoginPhoneConfirm => {
             if !plan_state.emitted_phone_confirm {
                 plan_state.emitted_phone_confirm = true;
+                // TODO: 在扫描确认阶段同步 session.scan 事件；暂不直接转发，避免误伤现有 login ws 订阅行为。
                 return Some(SelectedAction {
                     action: actions::sequence(vec![
                         Action::Emit {

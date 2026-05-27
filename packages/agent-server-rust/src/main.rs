@@ -5,6 +5,7 @@ mod db;
 mod effects;
 mod execution;
 mod ia;
+mod config;
 mod events;
 mod tools;
 mod plans;
@@ -48,6 +49,31 @@ async fn main() {
     sessions::manager::initialize_sessions()
         .await
         .expect("Failed to initialize sessions");
+
+    // Initialize event bus and pollers
+    let ws_config = config::WsConfig::from_env();
+    let pollers_config = config::PollersConfig::from_env();
+    let bus = std::sync::Arc::new(
+        crate::events::bus::EventBus::new(ws_config.broadcast_capacity, ws_config.ring_buffer_size),
+    );
+    crate::events::set_global_bus(bus.clone());
+
+    crate::events::pollers::spawn(
+        crate::events::pollers::message::MessagePoller::new(pollers_config.message_interval_ms),
+        bus.clone(),
+    );
+    crate::events::pollers::spawn(
+        crate::events::pollers::friend_request::FriendRequestPoller::new(
+            pollers_config.friend_request_interval_ms,
+        ),
+        bus.clone(),
+    );
+    crate::events::pollers::spawn(
+        crate::events::pollers::contact_diff::ContactDiffPoller::new(
+            pollers_config.contact_diff_interval_secs,
+        ),
+        bus.clone(),
+    );
 
     // Start background health monitor
     sessions::health_monitor::spawn_health_monitor();

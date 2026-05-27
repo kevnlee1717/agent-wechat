@@ -1,4 +1,6 @@
 use rusqlite::{params, Connection};
+use crate::events::get_global_bus;
+use crate::events::pollers::session_emitter;
 
 // ============================================
 // SYNC STATE QUERIES
@@ -56,6 +58,8 @@ pub fn update_session_logged_in_user(
     session_id: &str,
     logged_in_user: Option<&str>,
 ) {
+    let previous = get_session_logged_in_user(conn, session_id);
+
     let now = chrono::Utc::now().to_rfc3339();
     let login_state = if logged_in_user.is_some() { "logged_in" } else { "logged_out" };
     conn.execute(
@@ -63,6 +67,14 @@ pub fn update_session_logged_in_user(
         params![logged_in_user, login_state, now, session_id],
     )
     .ok();
+
+    if let Some(bus) = get_global_bus() {
+        match (previous.as_deref(), logged_in_user) {
+            (None, Some(wxid)) => session_emitter::emit_login(&bus, wxid, session_id),
+            (Some(old_wxid), None) => session_emitter::emit_logout(&bus, old_wxid, "session.logged_out"),
+            _ => {}
+        }
+    }
 }
 
 pub fn clear_session_data(conn: &Connection, session_id: &str) {
