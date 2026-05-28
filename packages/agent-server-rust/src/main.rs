@@ -74,6 +74,21 @@ async fn main() {
         ),
         bus.clone(),
     );
+    let media_dir = std::env::var("WECHAT_MEDIA_DIR").unwrap_or_else(|_| "/wechat-media".into());
+    let media_path = std::path::PathBuf::from(media_dir);
+    if let Err(e) = std::fs::create_dir_all(&media_path) {
+        tracing::warn!(
+            error = %e,
+            "WECHAT_MEDIA_DIR 创建失败，MediaPoller 仍会启动",
+        );
+    }
+    crate::events::pollers::spawn(
+        crate::events::pollers::media::MediaPoller::new(
+            pollers_config.media_interval_ms.unwrap_or(2000),
+            media_path,
+        ),
+        bus.clone(),
+    );
 
     // Start background health monitor
     sessions::health_monitor::spawn_health_monitor();

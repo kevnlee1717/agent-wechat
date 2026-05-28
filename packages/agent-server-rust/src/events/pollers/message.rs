@@ -149,6 +149,7 @@ fn message_event(message: &Message) -> Event {
             "serverId": message.server_id.to_string(),
             "localId": message.local_id,
             "isSelf": message.is_self.unwrap_or(false),
+            "isMentioned": message.is_mentioned.unwrap_or(false),
             "timestamp": message.timestamp.clone(),
         }),
     )

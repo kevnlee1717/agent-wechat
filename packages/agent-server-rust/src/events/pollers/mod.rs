@@ -4,6 +4,7 @@ pub mod message;
 pub mod friend_request;
 pub mod contact_diff;
 pub mod session_emitter;
+pub mod media;
 
 use crate::events::bus::EventBus;
 use async_trait::async_trait;
