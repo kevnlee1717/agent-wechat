@@ -440,6 +440,14 @@ pub struct Message {
     pub reply: Option<ReplyInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChatroomMember {
+    pub wxid: String,
+    pub nickname: String,
+}
+
 // ============================================
 // Settings types (shared — generates TypeScript)
 // ============================================

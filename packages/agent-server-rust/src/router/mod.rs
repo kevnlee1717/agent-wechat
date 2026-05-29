@@ -1,4 +1,5 @@
 pub mod auth;
+mod chatroom_members;
 mod chats;
 mod contacts;
 mod debug;
@@ -40,6 +41,7 @@ pub fn build_router() -> Router {
         .route("/api/chats/{id}", get(chats::get_chat))
         .route("/api/chats/find", get(chats::find_chats))
         .route("/api/chats/{id}/open", post(chats::open_chat))
+        .route("/api/chatrooms/{id}/members", get(chatroom_members::list_members))
         // Contacts
         .route("/api/contacts", get(contacts::list_contacts))
         .route("/api/contacts/find", get(contacts::find_contacts))

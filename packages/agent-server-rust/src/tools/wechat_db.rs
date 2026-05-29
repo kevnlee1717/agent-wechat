@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{types::ToSql, Connection, OpenFlags};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,6 +49,85 @@ pub fn query_wechat_db(
         .collect();
 
     let rows = stmt.query_map([], |row| {
+        let mut map = Map::new();
+        for (i, name) in col_names.iter().enumerate() {
+            let val: Value = match row.get_ref(i) {
+                Ok(rusqlite::types::ValueRef::Null) => Value::Null,
+                Ok(rusqlite::types::ValueRef::Integer(n)) => Value::Number(n.into()),
+                Ok(rusqlite::types::ValueRef::Real(f)) => serde_json::Number::from_f64(f)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null),
+                Ok(rusqlite::types::ValueRef::Text(s)) => {
+                    Value::String(String::from_utf8_lossy(s).into_owned())
+                }
+                Ok(rusqlite::types::ValueRef::Blob(b)) => {
+                    // Hex-encode blobs (safety net — callers typically use hex() in SQL)
+                    let mut hex = String::with_capacity(b.len() * 2);
+                    for byte in b {
+                        use std::fmt::Write;
+                        let _ = write!(hex, "{byte:02X}");
+                    }
+                    Value::String(hex)
+                }
+                Err(_) => Value::Null,
+            };
+            map.insert(name.clone(), val);
+        }
+        Ok(Value::Object(map))
+    });
+
+    match rows {
+        Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            tracing::warn!("[wechat-db] Query failed for {db_path}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Same as query_wechat_db, but executes SQL with bound parameters.
+pub fn query_wechat_db_params(
+    db_path: &str,
+    hex_key: &str,
+    sql: &str,
+    params: &[&dyn ToSql],
+) -> Vec<Value> {
+    let uri = format!("file:{}?immutable=1", db_path);
+    let conn = match Connection::open_with_flags(
+        &uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("[wechat-db] Failed to open {db_path}: {e}");
+            return Vec::new();
+        }
+    };
+
+    if let Err(e) = conn.execute_batch(&format!(
+        "PRAGMA key = \"x'{hex_key}'\"; PRAGMA cipher_compatibility = 4;"
+    )) {
+        tracing::warn!("[wechat-db] PRAGMA failed for {db_path}: {e}");
+        return Vec::new();
+    }
+
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("[wechat-db] Prepare failed for {db_path}: {e}");
+            return Vec::new();
+        }
+    };
+
+    let col_names: Vec<String> = stmt
+        .column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let rows = stmt.query_map(params, |row| {
         let mut map = Map::new();
         for (i, name) in col_names.iter().enumerate() {
             let val: Value = match row.get_ref(i) {
