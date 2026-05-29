@@ -150,6 +150,7 @@ fn message_event(message: &Message) -> Event {
             "localId": message.local_id,
             "isSelf": message.is_self.unwrap_or(false),
             "isMentioned": message.is_mentioned.unwrap_or(false),
+            "mentionedWxids": message.mentioned_wxids.clone().unwrap_or_default(),
             "timestamp": message.timestamp.clone(),
         }),
     )

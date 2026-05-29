@@ -163,18 +163,17 @@ pub(crate) fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
     if val.is_empty() { None } else { Some(val) }
 }
 
-/// Check if the source XML indicates the current user is @-mentioned.
-fn check_is_mentioned(source: &str, account_dir: &str) -> bool {
-    if let Some(at_list) = extract_xml_tag(source, "atuserlist") {
-        // atuserlist may contain comma-separated wxids
-        for wxid in at_list.split(',') {
-            let wxid = wxid.trim();
-            if !wxid.is_empty() && account_dir.starts_with(wxid) {
-                return true;
-            }
-        }
+/// 从 source/content XML 提取全部被@的 wxid（含特殊 token notify@all）。
+fn extract_mentioned_wxids(xml: &str) -> Vec<String> {
+    if let Some(at_list) = extract_xml_tag(xml, "atuserlist") {
+        return at_list
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
     }
-    false
+    Vec::new()
 }
 
 /// Find which message DB contains a chat and return (db_name, key).
@@ -341,8 +340,8 @@ pub fn list_messages(
                 })
                 .unwrap_or_default();
 
-            // Check @-mention from source XML (only for group chats)
-            let is_mentioned = if is_group {
+            // 群聊才解析被@名单（source XML，type-49 回落 content）
+            let (mentioned_wxids, is_mentioned) = if is_group {
                 let hex_source = row
                     .get("hex_source")
                     .and_then(|v| v.as_str())
@@ -352,28 +351,23 @@ pub fn list_messages(
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0)
                     != 0;
-                let from_source = if !hex_source.is_empty() {
+                let mut list: Vec<String> = if !hex_source.is_empty() {
                     let source_xml = decode_message_content(hex_source, source_compressed);
-                    check_is_mentioned(&source_xml, account_dir)
+                    extract_mentioned_wxids(&source_xml)
                 } else {
-                    false
+                    Vec::new()
                 };
 
                 // For type-49 (appmsg) messages — especially reference/quote messages —
                 // WeChat may place <atuserlist> inside the content XML instead of source.
-                let from_content = if !from_source && (msg_type & 0x7FFFFFFF) == 49 {
-                    check_is_mentioned(&body, account_dir)
-                } else {
-                    false
-                };
-
-                if from_source || from_content {
-                    Some(true)
-                } else {
-                    None
+                if list.is_empty() && (msg_type & 0x7FFFFFFF) == 49 {
+                    list = extract_mentioned_wxids(&body);
                 }
+                let mentioned = list.iter().any(|w| account_dir.starts_with(w.as_str()));
+                let mw = if list.is_empty() { None } else { Some(list) };
+                (mw, if mentioned { Some(true) } else { None })
             } else {
-                None
+                (None, None)
             };
 
             // Check if message was sent by the logged-in user
@@ -392,6 +386,7 @@ pub fn list_messages(
                 msg_type,
                 content,
                 timestamp,
+                mentioned_wxids,
                 is_mentioned,
                 is_self,
                 reply,
