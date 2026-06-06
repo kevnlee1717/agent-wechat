@@ -15,6 +15,23 @@ struct ImageKeys {
     xor_byte: Option<u8>,
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum ImageSource {
+    Original,
+    Thumbnail,
+    None,
+}
+
+pub(crate) fn pick_image_source(dat_exists: bool, thumb_exists: bool) -> ImageSource {
+    if dat_exists {
+        ImageSource::Original
+    } else if thumb_exists {
+        ImageSource::Thumbnail
+    } else {
+        ImageSource::None
+    }
+}
+
 fn unsupported() -> MediaResult {
     MediaResult {
         media_type: "unsupported".into(),
@@ -509,6 +526,35 @@ fn find_dat_via_resource_db(
     None
 }
 
+/// 只查全分辨率 .dat（绝不回退 _t.dat 缩略图）。用于"拿最大的图"。
+fn find_original_dat(
+    account_dir: &str,
+    keys: &HashMap<String, String>,
+    chat_id: &str,
+    local_id: i64,
+    create_time: i64,
+) -> Option<String> {
+    let file_hash = find_file_hash_via_resource_db(account_dir, keys, chat_id, local_id)?;
+
+    let chat_hash = format!("{:x}", Md5::digest(chat_id.as_bytes()));
+    let dt = chrono::DateTime::from_timestamp(create_time, 0)?;
+    let year_month = dt.format("%Y-%m").to_string();
+
+    for base in &account_base_paths(account_dir) {
+        let dat_path = Path::new(base)
+            .join("msg/attach")
+            .join(&chat_hash)
+            .join(&year_month)
+            .join("Img")
+            .join(format!("{file_hash}.dat"));
+        if dat_path.exists() {
+            return Some(dat_path.to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
+
 /// Get video data: .mp4 if downloaded, otherwise cover .jpg or _thumb.jpg.
 /// Videos are stored unencrypted at msg/video/{YYYY-MM}/{hash}.mp4
 fn get_video_data(
@@ -939,33 +985,57 @@ pub fn get_message_media(
                 chat_id, local_id, create_time, content.len()
             );
 
-            // Try cached thumbnail first
-            if let Some(thumb) =
+            let original_dat_path = if image_keys_raw.is_some() {
+                find_original_dat(account_dir, keys, chat_id, local_id, create_time)
+            } else {
+                None
+            };
+            let thumbnail = if original_dat_path.is_none() {
                 get_image_thumbnail(account_dir, chat_id, local_id, create_time)
-            {
-                tracing::info!("[media] found thumbnail for local_id={}", local_id);
-                return thumb;
+            } else {
+                None
+            };
+
+            match pick_image_source(original_dat_path.is_some(), thumbnail.is_some()) {
+                ImageSource::Original => {
+                    if let Some((aes_hex, xor_byte)) = image_keys_raw.clone() {
+                        let image_keys = ImageKeys {
+                            aes_key_hex: aes_hex,
+                            xor_byte,
+                        };
+                        if let Some(dat_path) = original_dat_path {
+                            tracing::info!(
+                                "[media] using ORIGINAL dat for local_id={}: {}",
+                                local_id,
+                                dat_path
+                            );
+                            return decrypt_and_return(&dat_path, &image_keys, local_id);
+                        }
+                    }
+                }
+                ImageSource::Thumbnail => {
+                    tracing::info!("[media] fallback thumbnail for local_id={}", local_id);
+                    if let Some(thumb) = thumbnail {
+                        return thumb;
+                    }
+                }
+                ImageSource::None => {
+                    tracing::info!(
+                        "[media] no original dat or thumbnail for local_id={}",
+                        local_id
+                    );
+                }
             }
-            tracing::info!("[media] no thumbnail for local_id={}", local_id);
 
-
-            // Try .dat decryption if we have image keys
+            // Fallback: try hardlink.db (older images may not be in resource db)
             if let Some((aes_hex, xor_byte)) = image_keys_raw {
                 let image_keys = ImageKeys {
                     aes_key_hex: aes_hex,
                     xor_byte,
                 };
-
-                // Primary: look up filename from message_resource.db
-                if let Some(dat_path) = find_dat_via_resource_db(
-                    account_dir, keys, chat_id, local_id, create_time,
-                ) {
-                    tracing::info!("[media] found dat via resource-db: {}", dat_path);
-                    return decrypt_and_return(&dat_path, &image_keys, local_id);
-                }
-
-                // Fallback: try hardlink.db (older images may not be in resource db)
-                if let Some(dat_path) = find_dat_via_hardlink(account_dir, keys, chat_id, &content) {
+                if let Some(dat_path) =
+                    find_dat_via_hardlink(account_dir, keys, chat_id, &content)
+                {
                     tracing::info!("[media] found dat via hardlink: {}", dat_path);
                     return decrypt_and_return(&dat_path, &image_keys, local_id);
                 }
@@ -1008,5 +1078,17 @@ pub fn get_message_media(
             }
             unsupported()
         }
+    }
+}
+
+#[cfg(test)]
+mod tr025_tests {
+    use super::*;
+
+    #[test]
+    fn prefers_original_over_thumbnail() {
+        assert_eq!(pick_image_source(true, true), ImageSource::Original);
+        assert_eq!(pick_image_source(false, true), ImageSource::Thumbnail);
+        assert_eq!(pick_image_source(false, false), ImageSource::None);
     }
 }
