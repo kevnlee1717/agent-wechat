@@ -86,6 +86,8 @@ async fn main() {
         crate::events::pollers::media::MediaPoller::new(
             pollers_config.media_interval_ms.unwrap_or(2000),
             media_path,
+            pollers_config.image_fetch_original,
+            pollers_config.image_fetch_timeout_ms,
         ),
         bus.clone(),
     );

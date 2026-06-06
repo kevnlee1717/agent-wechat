@@ -22,6 +22,10 @@ pub struct PollersConfig {
     pub contact_diff_interval_secs: u64,
     #[serde(default = "default_media_interval_ms")]
     pub media_interval_ms: Option<u64>,
+    #[serde(default = "default_image_fetch_original")]
+    pub image_fetch_original: bool,
+    #[serde(default = "default_image_fetch_timeout_ms")]
+    pub image_fetch_timeout_ms: u64,
 }
 
 impl Default for WsConfig {
@@ -41,6 +45,8 @@ impl Default for PollersConfig {
             friend_request_interval_ms: default_friend_request_interval_ms(),
             contact_diff_interval_secs: default_contact_diff_interval_secs(),
             media_interval_ms: default_media_interval_ms(),
+            image_fetch_original: default_image_fetch_original(),
+            image_fetch_timeout_ms: default_image_fetch_timeout_ms(),
         }
     }
 }
@@ -82,6 +88,14 @@ impl PollersConfig {
             media_interval_ms: std::env::var("YOYO_WS_MEDIA_INTERVAL_MS")
                 .ok()
                 .and_then(|s| s.parse().ok()),
+            image_fetch_original: std::env::var("YOYO_WS_IMAGE_FETCH_ORIGINAL")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(true),
+            image_fetch_timeout_ms: std::env::var("YOYO_WS_IMAGE_FETCH_TIMEOUT_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5000),
         }
     }
 }
@@ -112,4 +126,12 @@ fn default_contact_diff_interval_secs() -> u64 {
 
 fn default_media_interval_ms() -> Option<u64> {
     Some(2000)
+}
+
+fn default_image_fetch_original() -> bool {
+    true
+}
+
+fn default_image_fetch_timeout_ms() -> u64 {
+    5000
 }

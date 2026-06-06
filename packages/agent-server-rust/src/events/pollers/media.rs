@@ -7,7 +7,7 @@ use crate::sessions::manager::get_session;
 use crate::tools::wechat_chats;
 use crate::tools::wechat_db::{find_wechat_pid, list_account_dbs};
 use crate::tools::wechat_keys::{extract_keys_async, get_image_keys, get_stored_keys, store_keys};
-use crate::tools::wechat_media::get_message_media;
+use crate::tools::wechat_media::{get_message_media, original_dat_exists};
 use crate::tools::wechat_messages;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -17,22 +17,35 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
+use tokio::sync::Mutex;
+
+static UI_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 pub struct MediaPoller {
     pub last_seen: HashMap<String, i64>,
     pub interval_ms: u64,
     pub cold_start: bool,
     pub media_dir: PathBuf,
+    pub image_fetch_original: bool,
+    pub image_fetch_timeout_ms: u64,
 }
 
 impl MediaPoller {
-    pub fn new(interval_ms: u64, media_dir: PathBuf) -> Self {
+    pub fn new(
+        interval_ms: u64,
+        media_dir: PathBuf,
+        image_fetch_original: bool,
+        image_fetch_timeout_ms: u64,
+    ) -> Self {
         Self {
             last_seen: HashMap::new(),
             interval_ms,
             cold_start: true,
             media_dir,
+            image_fetch_original,
+            image_fetch_timeout_ms,
         }
     }
 }
@@ -46,6 +59,63 @@ enum PollAction {
 
 fn is_media_message_type(msg_type: i32) -> bool {
     matches!(msg_type, 3 | 43)
+}
+
+fn message_create_time(timestamp: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|dt| dt.timestamp())
+}
+
+async fn wait_for_original_image(
+    account_dir: &str,
+    keys: &HashMap<String, String>,
+    chat_id: &str,
+    local_id: i64,
+    create_time: i64,
+    timeout_ms: u64,
+) {
+    if original_dat_exists(account_dir, keys, chat_id, local_id, create_time) {
+        return;
+    }
+
+    let _guard = UI_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await;
+
+    if original_dat_exists(account_dir, keys, chat_id, local_id, create_time) {
+        return;
+    }
+
+    let open_result = crate::tools::chat_select::open_chat(chat_id, false, None).await;
+    if !open_result.ok {
+        tracing::warn!(
+            chat_id = %chat_id,
+            local_id,
+            error = ?open_result.error,
+            "open_chat failed while fetching original image"
+        );
+    }
+
+    let mut waited = 0u64;
+    while waited < timeout_ms {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        waited += 500;
+        if original_dat_exists(account_dir, keys, chat_id, local_id, create_time) {
+            tracing::info!(
+                "[media] original dat landed local_id={} after {}ms",
+                local_id,
+                waited
+            );
+            return;
+        }
+    }
+
+    tracing::warn!(
+        "[media] original fetch timeout, will fall back to thumbnail local_id={}",
+        local_id
+    );
 }
 
 fn decide_media_action(media_type: &str, has_data: bool, cold_start: bool) -> PollAction {
@@ -167,6 +237,27 @@ impl Poller for MediaPoller {
                     latest_seen = msg.local_id;
                     updated = true;
                     continue;
+                }
+
+                if msg.msg_type == 3 && self.image_fetch_original {
+                    if let Some(create_time) = message_create_time(&msg.timestamp) {
+                        wait_for_original_image(
+                            &logged_in_user,
+                            &keys,
+                            &chat_id,
+                            msg.local_id,
+                            create_time,
+                            self.image_fetch_timeout_ms,
+                        )
+                        .await;
+                    } else {
+                        tracing::warn!(
+                            chat_id = %chat_id,
+                            local_id = msg.local_id,
+                            timestamp = %msg.timestamp,
+                            "message timestamp unavailable, skip original image prefetch"
+                        );
+                    }
                 }
 
                 let media = get_message_media(

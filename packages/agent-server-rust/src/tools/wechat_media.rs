@@ -527,7 +527,7 @@ fn find_dat_via_resource_db(
 }
 
 /// 只查全分辨率 .dat（绝不回退 _t.dat 缩略图）。用于"拿最大的图"。
-fn find_original_dat(
+pub(crate) fn find_original_dat(
     account_dir: &str,
     keys: &HashMap<String, String>,
     chat_id: &str,
@@ -553,6 +553,16 @@ fn find_original_dat(
     }
 
     None
+}
+
+pub(crate) fn original_dat_exists(
+    account_dir: &str,
+    keys: &HashMap<String, String>,
+    chat_id: &str,
+    local_id: i64,
+    create_time: i64,
+) -> bool {
+    find_original_dat(account_dir, keys, chat_id, local_id, create_time).is_some()
 }
 
 /// Get video data: .mp4 if downloaded, otherwise cover .jpg or _thumb.jpg.
