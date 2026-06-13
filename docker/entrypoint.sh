@@ -135,7 +135,10 @@ fi
 # ============================================
 # Start accessibility daemon as wechat user
 # ============================================
-if [ -x /usr/libexec/at-spi-bus-launcher ]; then
+# RECEIVE_ONLY: 稳态零 a11y（低 CPU），登录时由 agent-server 按需拉起 at-spi，不在此常驻。
+if [ "${AGENT_WECHAT_RECEIVE_ONLY:-0}" = "1" ]; then
+  echo "RECEIVE_ONLY=1: skip persistent at-spi-bus-launcher (on-demand during login)"
+elif [ -x /usr/libexec/at-spi-bus-launcher ]; then
   su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME /usr/libexec/at-spi-bus-launcher &" wechat
   sleep 1  # Give AT-SPI time to register
 fi

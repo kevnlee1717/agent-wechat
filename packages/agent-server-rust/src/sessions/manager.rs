@@ -193,13 +193,17 @@ pub async fn start_session(id_or_name: &str) -> Result<Session, String> {
         .spawn();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // 4. AT-SPI
-    let _ = std::process::Command::new("su")
-        .args(["-s", "/bin/bash", "-c",
-            &format!("DISPLAY={display} DBUS_SESSION_BUS_ADDRESS={dbus_address} HOME={home_dir} /usr/libexec/at-spi-bus-launcher &"),
-            linux_user.as_str()])
-        .spawn();
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // 4. AT-SPI -- RECEIVE_ONLY 稳态零 a11y，登录时按需拉起，这里不常驻
+    if !crate::config::receive_only() {
+        let _ = std::process::Command::new("su")
+            .args(["-s", "/bin/bash", "-c",
+                &format!("DISPLAY={display} DBUS_SESSION_BUS_ADDRESS={dbus_address} HOME={home_dir} /usr/libexec/at-spi-bus-launcher &"),
+                linux_user.as_str()])
+            .spawn();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    } else {
+        tracing::info!("[session] RECEIVE_ONLY: skip persistent at-spi (on-demand during login)");
+    }
 
     // 5. VNC (localhost only — auth enforced by agent-server proxy)
     let vnc_port = session.vnc_port.to_string();
