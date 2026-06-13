@@ -66,4 +66,20 @@ mod tests {
         // 不论环境有没有 at-spi，都应返回 bool 而非 panic
         let _ = super::is_a11y_running();
     }
+
+    #[test]
+    fn test_stop_guard_inactive_is_noop() {
+        // active=false 时 drop 不应触碰系统（仅验证构造/析构不 panic）
+        struct G {
+            active: bool,
+        }
+        impl Drop for G {
+            fn drop(&mut self) {
+                if self.active {
+                    super::stop_a11y();
+                }
+            }
+        }
+        let _g = G { active: false };
+    }
 }

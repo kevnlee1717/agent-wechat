@@ -59,6 +59,24 @@ where
     }
     let _health_guard = ResumeOnDrop;
 
+    // RECEIVE_ONLY：稳态零 a11y，登录等执行窗口期临时拉起 at-spi，执行结束停掉回稳态。
+    if crate::config::receive_only() {
+        crate::tools::a11y_daemon::ensure_a11y_running(&context.session).await;
+    }
+    struct StopA11yOnDrop {
+        active: bool,
+    }
+    impl Drop for StopA11yOnDrop {
+        fn drop(&mut self) {
+            if self.active {
+                crate::tools::a11y_daemon::stop_a11y();
+            }
+        }
+    }
+    let _a11y_guard = StopA11yOnDrop {
+        active: crate::config::receive_only(),
+    };
+
     let mut plan_state = plan.initial_plan_state();
     let session_id = context.session_id.clone();
 
