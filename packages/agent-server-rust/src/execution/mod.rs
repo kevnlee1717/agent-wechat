@@ -87,6 +87,9 @@ where
 
     let execution_start = std::time::Instant::now();
     let mut unknown_state_since: Option<std::time::Instant> = None;
+    let mut consecutive_a11y_failures: u32 = 0;
+    const MAX_A11Y_FAILURES: u32 = 8;
+    const A11Y_REPROBE_AT: u32 = 3;
 
     for step in 0..MAX_STEPS {
         // Check execution timeout
@@ -110,9 +113,45 @@ where
         // 1. OBSERVE: get a11y tree + screenshot
         let a11y_result = get_a11y_desktop(&exec_options).await;
         let a11y = match a11y_result {
-            Ok(tree) => tree,
+            Ok(tree) => {
+                consecutive_a11y_failures = 0;
+                tree
+            }
             Err(e) => {
-                tracing::warn!("[exec] a11y failed on step {step}: {e}");
+                consecutive_a11y_failures += 1;
+                tracing::warn!(
+                    "[exec] a11y failed on step {step} ({}/{}): {e}",
+                    consecutive_a11y_failures, MAX_A11Y_FAILURES
+                );
+                // RECEIVE_ONLY: a11y daemon may have died; try bringing it back once.
+                if crate::config::receive_only() && consecutive_a11y_failures == A11Y_REPROBE_AT {
+                    crate::tools::a11y_daemon::ensure_a11y_running(&context.session).await;
+                }
+                // Stop retrying forever if accessibility stays unavailable.
+                if consecutive_a11y_failures >= MAX_A11Y_FAILURES {
+                    tracing::error!(
+                        "[exec] a11y unavailable after {} tries, aborting",
+                        MAX_A11Y_FAILURES
+                    );
+                    emit(SubscriptionEvent {
+                        event_type: "failed".to_string(),
+                        data: [(
+                            "message".to_string(),
+                            serde_json::Value::String(
+                                "Accessibility unavailable, login aborted".to_string(),
+                            ),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    });
+                    return (
+                        ExecutionResult {
+                            success: false,
+                            error: Some("a11y unavailable".to_string()),
+                        },
+                        plan_state,
+                    );
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 continue;
             }
