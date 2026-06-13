@@ -1,4 +1,5 @@
 pub mod a11y;
+pub mod a11y_daemon;
 pub mod chat_select;
 pub mod exec;
 pub mod qr;
