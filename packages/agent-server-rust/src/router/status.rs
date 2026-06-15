@@ -49,14 +49,20 @@ pub async fn auth_status() -> Json<serde_json::Value> {
 
     if config::receive_only() {
         let wechat_pid = find_wechat_pid();
-        let status = receive_only_auth_status(
-            wechat_pid,
-            wechat_pid.and_then(find_account_dir),
-        );
+        let account_dir = wechat_pid.and_then(find_account_dir);
+        let status = receive_only_auth_status(wechat_pid, account_dir.clone());
+
+        // 兜底：扫码登录成功若发生在 login plan 活跃窗口外，session.logged_in_user 不会被写入。
+        // 此时只要已登录，就用 account_dir（= login plan 写入 logged_in_user 的同一来源）兜底，
+        // 保证前端始终能显示当前登录账号。
+        let logged_in_user = session
+            .logged_in_user
+            .clone()
+            .or_else(|| if status == "logged_in" { account_dir } else { None });
 
         return Json(serde_json::json!({
             "status": status,
-            "loggedInUser": session.logged_in_user,
+            "loggedInUser": logged_in_user,
         }));
     }
 

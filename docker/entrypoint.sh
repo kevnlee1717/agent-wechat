@@ -137,19 +137,11 @@ fi
 # ============================================
 # 始终常驻 at-spi（必须在下方 launch-wechat 之前）：WeChat 启动时连上 a11y bus → registryd 激活并常驻，
 # 登录二维码链路一直可用。RO 模式原本"稳态零 a11y"按需拉起 at-spi，但在 amd64 上 at-spi 于 WeChat 之后
-# spawn 激活不了 registryd（时序错），导致登录 a11y unavailable。故回退为常驻（牺牲少量 CPU 换登录可靠）。
-# keeper 守护：若按需 Drop guard（RO 模式登录后 stop_a11y）或其它原因杀掉 at-spi，自动重启保持常驻。
+# spawn 激活不了 registryd（时序错），导致登录 a11y unavailable。故在此（WeChat 启动前）拉起一次 at-spi，
+# WeChat 启动即连上 a11y bus；之后 at-spi 进程退出，由 dbus 按需激活（稳态零常驻 at-spi，登录时自动可用）。
 if [ -x /usr/libexec/at-spi-bus-launcher ]; then
   su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME /usr/libexec/at-spi-bus-launcher &" wechat
   sleep 1  # Give AT-SPI time to register
-  (
-    while true; do
-      sleep 5
-      if ! pgrep -f at-spi2-registryd >/dev/null 2>&1; then
-        su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME /usr/libexec/at-spi-bus-launcher &" wechat
-      fi
-    done
-  ) &
 fi
 
 # ============================================
