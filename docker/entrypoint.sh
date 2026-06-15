@@ -135,13 +135,17 @@ fi
 # ============================================
 # Start accessibility daemon as wechat user
 # ============================================
-# 始终常驻 at-spi（必须在下方 launch-wechat 之前）：WeChat 启动时连上 a11y bus → registryd 激活并常驻，
-# 登录二维码链路一直可用。RO 模式原本"稳态零 a11y"按需拉起 at-spi，但在 amd64 上 at-spi 于 WeChat 之后
-# spawn 激活不了 registryd（时序错），导致登录 a11y unavailable。故在此（WeChat 启动前）拉起一次 at-spi，
-# WeChat 启动即连上 a11y bus；之后 at-spi 进程退出，由 dbus 按需激活（稳态零常驻 at-spi，登录时自动可用）。
+# at-spi 必须在 launch-wechat 之前就绪，且**全程常驻**：WeChat 启动时连上 a11y bus → registryd 激活，
+# 登录二维码链路一直可读。坑（2026-06-15 定位）：旧设计让 launcher 在 WeChat 连上后退出、靠 dbus 按需重激活，
+# 但 launcher 一退 ~/.cache/at-spi/bus_99 留下死 socket；等 WeChat 掉线、前端要二维码时按需重拉 launcher 撞 stale
+# socket → 早退 → a11y unavailable，且已在跑的 WeChat 错过注册窗口救不回，每次都得人工清缓存重启。
+# 修法：① 启动前清掉 stale at-spi socket；② launcher 守护常驻（只在真死掉时重拉，带 5s 下限防 churn，
+# 不是 memory 警告的每 5s 轮询 keeper）。launcher 是轻量 bus broker，idle CPU ≈ 0。
+rm -rf "$WECHAT_HOME/.cache/at-spi" 2>/dev/null || true
 if [ -x /usr/libexec/at-spi-bus-launcher ]; then
-  su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME /usr/libexec/at-spi-bus-launcher &" wechat
-  sleep 1  # Give AT-SPI time to register
+  su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME \
+    bash -c 'while true; do /usr/libexec/at-spi-bus-launcher; sleep 5; done' &" wechat
+  sleep 2  # Give AT-SPI time to register on the session bus before WeChat launches
 fi
 
 # ============================================
