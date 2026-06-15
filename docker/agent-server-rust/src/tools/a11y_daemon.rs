@@ -42,15 +42,11 @@ pub async fn ensure_a11y_running(session: &Session) {
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 }
 
-/// 停止 a11y daemon，回到稳态零 a11y（低 CPU）。
+/// 已废弃（2026-06-15）：曾在每次执行窗口结束 pkill at-spi-bus-launcher 省 CPU，但会销毁 a11y bus →
+/// 长期掉线的 WeChat atk-bridge 注册永久失效、不重连 → 下次登录 a11y unavailable，反复人工救。
+/// 现 a11y bus 起一次永不销毁（常驻 idle CPU ≈ 0），此函数保留为 no-op 仅兼容调用点。
 pub fn stop_a11y() {
-    if !is_a11y_running() {
-        return;
-    }
-    tracing::info!("[a11y] stop at-spi-bus-launcher (back to low-CPU steady state)");
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", AT_SPI_MATCH])
-        .output();
+    // intentionally no-op：永不销毁 a11y bus，见上方说明
 }
 
 #[cfg(test)]

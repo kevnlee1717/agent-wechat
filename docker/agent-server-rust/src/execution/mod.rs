@@ -59,23 +59,13 @@ where
     }
     let _health_guard = ResumeOnDrop;
 
-    // RECEIVE_ONLY：稳态零 a11y，登录等执行窗口期临时拉起 at-spi，执行结束停掉回稳态。
+    // RECEIVE_ONLY：确保 a11y 在跑（entrypoint 已在 WeChat 之前拉起，这里仅兜底）。
+    // 注意（2026-06-15）：**不再执行结束就 stop**。长期掉线等登录的 WeChat 一旦 a11y bus 被销毁，其 atk-bridge
+    // 注册永久失效且不重连 → 下次要二维码时 a11y unavailable，反复人工救。a11y bus 必须起一次永不销毁；
+    // 常驻 idle CPU ≈ 0（churn 才耗 CPU）。故 StopA11yOnDrop 已废弃，stop_a11y 也改为 no-op。
     if crate::config::receive_only() {
         crate::tools::a11y_daemon::ensure_a11y_running(&context.session).await;
     }
-    struct StopA11yOnDrop {
-        active: bool,
-    }
-    impl Drop for StopA11yOnDrop {
-        fn drop(&mut self) {
-            if self.active {
-                crate::tools::a11y_daemon::stop_a11y();
-            }
-        }
-    }
-    let _a11y_guard = StopA11yOnDrop {
-        active: crate::config::receive_only(),
-    };
 
     let mut plan_state = plan.initial_plan_state();
     let session_id = context.session_id.clone();

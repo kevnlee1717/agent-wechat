@@ -135,16 +135,17 @@ fi
 # ============================================
 # Start accessibility daemon as wechat user
 # ============================================
-# at-spi 必须在 launch-wechat 之前就绪，且**全程常驻**：WeChat 启动时连上 a11y bus → registryd 激活，
-# 登录二维码链路一直可读。坑（2026-06-15 定位）：旧设计让 launcher 在 WeChat 连上后退出、靠 dbus 按需重激活，
-# 但 launcher 一退 ~/.cache/at-spi/bus_99 留下死 socket；等 WeChat 掉线、前端要二维码时按需重拉 launcher 撞 stale
-# socket → 早退 → a11y unavailable，且已在跑的 WeChat 错过注册窗口救不回，每次都得人工清缓存重启。
-# 修法：① 启动前清掉 stale at-spi socket；② launcher 守护常驻（只在真死掉时重拉，带 5s 下限防 churn，
-# 不是 memory 警告的每 5s 轮询 keeper）。launcher 是轻量 bus broker，idle CPU ≈ 0。
+# at-spi 必须在 launch-wechat 之前就绪并**全程存活**：WeChat 启动时连上 a11y bus → registryd 激活 → 它的
+# UI 树（含登录二维码）注册进 registry，且**只要 a11y bus 不被销毁就一直可读**。
+# 坑（2026-06-15 定位，根因在 agent-server 不在这里）：旧 on-demand 设计让 agent-server 每次执行窗口结束
+# `pkill at-spi-bus-launcher` 回收 a11y bus 省 CPU。但长期掉线等登录的 WeChat 一旦 a11y bus 被 kill，其
+# 注册永久失效、不重连 → 下次要二维码时 a11y unavailable。配套已把 agent-server `stop_a11y` 改为 no-op
+# （a11y_daemon.rs / execution StopA11yOnDrop active=false），a11y bus 起一次永不销毁。
+# 故这里只需：① 清 stale socket（防残留早退）；② WeChat 启动前单次拉起 launcher（不再需要守护循环，
+# 没人 kill 它了）。launcher 是轻量 bus broker，常驻 idle CPU ≈ 0。
 rm -rf "$WECHAT_HOME/.cache/at-spi" 2>/dev/null || true
 if [ -x /usr/libexec/at-spi-bus-launcher ]; then
-  su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME \
-    bash -c 'while true; do /usr/libexec/at-spi-bus-launcher; sleep 5; done' &" wechat
+  su -s /bin/bash -c "DISPLAY=$DISPLAY DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS HOME=$WECHAT_HOME /usr/libexec/at-spi-bus-launcher &" wechat
   sleep 2  # Give AT-SPI time to register on the session bus before WeChat launches
 fi
 
