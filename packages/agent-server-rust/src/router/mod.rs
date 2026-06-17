@@ -2,6 +2,7 @@ pub mod auth;
 mod chatroom_members;
 mod chats;
 mod contacts;
+pub mod media;
 mod debug;
 mod events;
 mod messages;
@@ -52,6 +53,7 @@ pub fn build_router() -> Router {
             get(messages::get_media),
         )
         .route("/api/messages/send", post(messages::send_message))
+        .route("/api/media/{*path}", get(media::get_media))
         // Debug
         .route("/api/debug/screenshot", get(debug::screenshot))
         .route("/api/debug/a11y", get(debug::a11y))
