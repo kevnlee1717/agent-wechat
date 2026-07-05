@@ -7,7 +7,7 @@ use crate::sessions::manager::get_session;
 use crate::tools::wechat_chats;
 use crate::tools::wechat_db::{find_wechat_pid, list_account_dbs};
 use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, store_keys};
-use crate::tools::wechat_messages;
+use crate::tools::wechat_messages::{self, extract_xml_tag};
 use crate::events::pollers::Poller;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -122,6 +122,11 @@ impl Poller for MessagePoller {
                         bus.publish(evt);
                     }
                 }
+                if msg.msg_type == 50 {
+                    if let Some(evt) = derive_call_event(&chat_id, &msg.content, &msg) {
+                        bus.publish(evt);
+                    }
+                }
             }
 
             if updated || self.last_seen.contains_key(&chat_id) {
@@ -188,6 +193,40 @@ pub fn derive_chatroom_event(chat_id: &str, content: &str) -> Option<Event> {
     None
 }
 
+/// 从 VOIPMSG XML 派生来电邀请事件。
+/// 只推邀请/响铃状态；缺 status 时保守上报，交给 gateway 去重。
+fn derive_call_event(chat_id: &str, content: &str, msg: &Message) -> Option<Event> {
+    let room_id = extract_xml_tag(content, "roomid");
+    let room_key = extract_xml_tag(content, "roomkey");
+    let room_type = extract_xml_tag(content, "roomtype");
+    let status = extract_xml_tag(content, "status");
+
+    if room_id.is_none()
+        && room_key.is_none()
+        && room_type.is_none()
+        && status.is_none()
+    {
+        return None;
+    }
+
+    if let Some(status) = status.as_deref() {
+        if status != "1" && status != "2" {
+            return None;
+        }
+    }
+
+    Some(Event::new(
+        kinds::CALL_INCOMING,
+        json!({
+            "chatId": chat_id,
+            "caller_display_name": msg.sender_name.clone().unwrap_or_default(),
+            "call_type": if room_type.as_deref() == Some("2") { "video" } else { "voice" },
+            "call_id": room_id.unwrap_or_else(|| msg.local_id.to_string()),
+            "ts": msg.timestamp.clone(),
+        }),
+    ))
+}
+
 fn extract_name_before(content: &str, marker: &str) -> Option<String> {
     content
         .split_once(marker)
@@ -226,6 +265,57 @@ mod tests {
     #[test]
     fn derive_chatroom_event_non_chatroom_is_none() {
         let evt = derive_chatroom_event("wxid_user", "wxid_x加入了群聊");
+        assert!(evt.is_none());
+    }
+
+    #[test]
+    fn derive_call_event_voip_invite_returns_incoming() {
+        let msg = Message {
+            local_id: 42,
+            server_id: 1001,
+            chat_id: "wxid_peer".to_string(),
+            sender: Some("wxid_peer".to_string()),
+            sender_name: Some("Alice".to_string()),
+            msg_type: 50,
+            content: [
+                "<voipmsg><voipinvitemsg><roomid>123</roomid><roomkey>456</roomkey>",
+                "</voipinvitemsg><voipcommon><roomtype>2</roomtype><status>1</status>",
+                "</voipcommon></voipmsg>",
+            ]
+            .join(""),
+            timestamp: "2026-07-05T10:00:00Z".to_string(),
+            is_mentioned: None,
+            mentioned_wxids: None,
+            is_self: None,
+            reply: None,
+        };
+
+        let evt = derive_call_event("wxid_peer", &msg.content, &msg);
+        assert!(evt.is_some());
+        let evt = evt.expect("call incoming event");
+        assert_eq!(evt.kind, kinds::CALL_INCOMING);
+        assert_eq!(evt.chat_id().unwrap_or_default(), "wxid_peer");
+        assert_eq!(evt.data["call_type"], "video");
+    }
+
+    #[test]
+    fn derive_call_event_non_voip_returns_none() {
+        let msg = Message {
+            local_id: 43,
+            server_id: 1002,
+            chat_id: "wxid_peer".to_string(),
+            sender: None,
+            sender_name: None,
+            msg_type: 50,
+            content: "这是一条普通消息".to_string(),
+            timestamp: "2026-07-05T10:01:00Z".to_string(),
+            is_mentioned: None,
+            mentioned_wxids: None,
+            is_self: None,
+            reply: None,
+        };
+
+        let evt = derive_call_event("wxid_peer", &msg.content, &msg);
         assert!(evt.is_none());
     }
 }

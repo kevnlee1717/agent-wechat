@@ -59,6 +59,7 @@ pub fn get_global_bus() -> Option<Arc<crate::events::bus::EventBus>> {
 pub mod kinds {
     pub const MESSAGE_NEW: &str = "message.new";
     pub const MESSAGE_MEDIA_READY: &str = "message.media_ready";
+    pub const CALL_INCOMING: &str = "call.incoming";
     pub const SESSION_LOGIN: &str = "session.login";
     pub const SESSION_LOGOUT: &str = "session.logout";
     pub const SESSION_QR_REFRESH: &str = "session.qr_refresh";
